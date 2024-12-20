@@ -150,14 +150,14 @@ BitmapFont font=fontManager.getFont((int) fontSize)
 skin.add("shs-regular", font);
 
 //從skin取得font
-font = skin.getFont(fontSB.toString());
+BitmapFont newFont = skin.getFont(fontSB.toString());
 
 //然後
-label.getStyle().font=font;
-//如果是button的子類,例如TextButton:
+label.getStyle().font=newFont;
 
+//如果是button的子類,例如TextButton:
 Label.LabelStyle style = button.getLabel().getStyle();
-style.font=font;
+style.font=newFont;
 button.getLabel().setStyle(style);//這裡需要setStyle以觸發字型更新
 ```
 
