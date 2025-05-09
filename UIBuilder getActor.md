@@ -1,6 +1,6 @@
 詢問AI:
 ```java
-uiBuilder.getResourceManager().registerCharacters("input", "character/common/chars1/characters.txt");
+        uiBuilder.getResourceManager().registerCharacters("input", "character/common/chars1/characters.txt");
         uiBuilder.getResourceManager().registerFontPath("title", "font/SourceHanSansHC-Bold.otf");
 
         uiBuilder.build(Gdx.files.internal("xml/mods/ceodemo/lobby.xml"));
