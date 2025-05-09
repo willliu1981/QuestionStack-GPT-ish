@@ -6,7 +6,7 @@
         uiBuilder.build(Gdx.files.internal("xml/mods/ceodemo/lobby.xml"));
         Actor actor = uiBuilder.getActor("tb_lobby");
 ```
-有什麼方法能該它getActor 之前,制約先 build?
+有什麼方法能讓它getActor 之前,制約先 build?
 builder 不直接getActor, 而是經由build後,某種方法才有getActor 的方法可用
 
 
