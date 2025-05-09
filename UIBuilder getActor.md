@@ -8,6 +8,8 @@
 ```
 有什麼方法能讓它getActor 之前,制約先 build?
 builder 不直接getActor, 而是經由build後,某種方法才有getActor 的方法可用
+ 
+ 
 
 
 GPT:
@@ -75,6 +77,4 @@ Actor actor = ui.getActor("tb_lobby");
 * **清晰的建構/使用階段區分**
 * **降低誤用、讓維護更安全**
 
----
 
-需要我幫你把這套模式寫成完整範例嗎？
