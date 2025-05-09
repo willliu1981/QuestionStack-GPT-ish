@@ -5,14 +5,6 @@
 
         uiBuilder.build(Gdx.files.internal("xml/mods/ceodemo/lobby.xml"));
         Actor actor = uiBuilder.getActor("tb_lobby");
-有什麼方法能該它getActor 之前,制約先 build?
-
-
-了解！你是想達成 **建構(build) 與取得(getActor) 階段完全分離**，也就是說：
-
-* `UIBuilder` 本身不能直接 `getActor()`，
-* 必須先 `build(...)`，它回傳一個「可操作的」對象（像是 View、Context、Result 之類的東西），
-* 然後從這個對象上才能調用 `getActor()`。
 ```
 有什麼方法能該它getActor 之前,制約先 build?
 builder 不直接getActor, 而是經由build後,某種方法才有getActor 的方法可用
