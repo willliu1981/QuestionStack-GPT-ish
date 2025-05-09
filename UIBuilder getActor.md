@@ -1,4 +1,4 @@
-詢問AI:
+## 詢問AI:
 ```java
         uiBuilder.getResourceManager().registerCharacters("input", "character/common/chars1/characters.txt");
         uiBuilder.getResourceManager().registerFontPath("title", "font/SourceHanSansHC-Bold.otf");
@@ -12,7 +12,7 @@ builder 不直接getActor, 而是經由build後,某種方法才有getActor 的�
  
 
 
-GPT:
+## GPT回答:
 了解！你是想達成 **建構(build) 與取得(getActor) 階段完全分離**，也就是說：
 
 * `UIBuilder` 本身不能直接 `getActor()`，
