@@ -11,6 +11,34 @@
 
 ---
 
+UIBuilder 支援 deferResolveActor(String id, Consumer<Actor>)
+你可以這樣設計 UIBuilder 的緩解機制：
+```java
+public void deferResolveActor(String actorId, Consumer<Actor> onResolved) {
+    if (namedActors.containsKey(actorId)) {
+        onResolved.accept(namedActors.get(actorId));
+    } else {
+        deferredBindings.add(new DeferredBinding(actorId, onResolved));
+    }
+}
+```
+等所有 XML 都解析完，呼叫：
+```java
+public void resolveAllDeferredBindings() {
+    for (DeferredBinding binding : deferredBindings) {
+        Actor actor = namedActors.get(binding.actorId);
+        if (actor != null) {
+            binding.callback.accept(actor);
+        } else {
+            throw new RuntimeException("Missing actor: " + binding.actorId);
+        }
+    }
+    deferredBindings.clear();
+}
+```
+
+---
+
 ## 🔄 將它應用在任意 Actor 的通用邏輯如下：
 
 ### ✅ 做法 1：建一個通用的 `ActorRefFactory`
