@@ -1,3 +1,8 @@
+# libgdx-actorref-loader
+
+這是一個擴充 LibGDX `UIBuilder` 系統的模組，實現了可延遲解析的 `actorRef` 機制，讓不同 XML 檔案之間能夠安全、穩定地相互引用未來才會建立的 Actor。
+
+---
 
 ## ✅ 引用其他地方尚未建立的 Actor
 
@@ -11,8 +16,10 @@
 
 ---
 
-UIBuilder 支援 deferResolveActor(String id, Consumer<Actor>)
+## 🔄 UIBuilder 支援 `deferResolveActor(String id, Consumer<Actor>)`
+
 你可以這樣設計 UIBuilder 的緩解機制：
+
 ```java
 public void deferResolveActor(String actorId, Consumer<Actor> onResolved) {
     if (namedActors.containsKey(actorId)) {
@@ -22,7 +29,9 @@ public void deferResolveActor(String actorId, Consumer<Actor> onResolved) {
     }
 }
 ```
+
 等所有 XML 都解析完，呼叫：
+
 ```java
 public void resolveAllDeferredBindings() {
     for (DeferredBinding binding : deferredBindings) {
@@ -39,9 +48,9 @@ public void resolveAllDeferredBindings() {
 
 ---
 
-## 🔄 將它應用在任意 Actor 的通用邏輯如下：
+## ✅ 將它應用在任意 Actor 的通用邏輯
 
-### ✅ 做法 1：建一個通用的 `ActorRefFactory`
+### ✅ 做法 1：建一個通用的 `XmlActorRefFactory`
 
 ```java
 public class XmlActorRefFactory extends ComponentFactory {
@@ -56,7 +65,7 @@ public class XmlActorRefFactory extends ComponentFactory {
 
         uiBuilder.deferResolveActor(actorId, resolved -> {
             placeholder.clearChildren();
-            placeholder.addActor(resolved); // 替換成真正 actor
+            placeholder.addActor(resolved);
         });
 
         addChildWithLayoutOptions(element, placeholder, containerGroup);
@@ -71,11 +80,9 @@ public class XmlActorRefFactory extends ComponentFactory {
 <actorRef actorRef="sharedBtn"/>
 ```
 
-或讓 `<Image>`、`<Label>` 這類 Actor factory 加入 `actorRef` 檢查：
-
 ---
 
-## ✅ 做法 2：在每個 ComponentFactory 加入對 `actorRef` 的判斷
+### ✅ 做法 2：在每個 ComponentFactory 加入對 `actorRef` 的判斷
 
 在 `XmlImageFactory` 中：
 
@@ -122,7 +129,7 @@ uiBuilder.resolveAllDeferredBindings();
 <image actorRef="sharedBtn" clone="true"/>
 ```
 
-讓他不是共用，而是複製該 Actor，這就需要你在 `UIBuilder` 中支援 clone actor 的行為（進階功能）。
+讓它不是共用，而是複製該 Actor，這就需要你在 `UIBuilder` 中支援 clone actor 的行為（進階功能）。
 
 ---
 
@@ -134,4 +141,4 @@ uiBuilder.resolveAllDeferredBindings();
 * `<image actorRef="logoImg"/>`
 * `<group> <actorRef actorRef="sharedToggle"/> </group>`
 
-
+這是一種強大又乾淨的 UI 模組化手段，讓 LibGDX 的 XML UI 定義支援跨檔引用與懶加載行為。
