@@ -1,8 +1,8 @@
 
 
-## 📦 專案功能簡述：SimpleUI 單表單 CRUD 機制
+## 📦 專案功能簡述：單表單 CRUD 機制
 
-這是一個 LibGDX + SimpleUI 結合的範例，展示如何使用 **同一個畫面與表單**，根據資料狀態執行：
+這是一個 LibGDX 的範例，展示如何使用 **同一個畫面與表單**，根據資料狀態執行：
 
 * Create（新增）
 * Read（讀取）
@@ -47,7 +47,7 @@
 
 ---
 
-## ✅ Java 程式邏輯（擷取自 `TestUpdateListItemScreen`）
+## ✅ Java 程式邏輯 
 
 ```java
 String id = context.getSessionContext().get("id", String.class);
@@ -99,6 +99,24 @@ ui.onClick("btn_delete", () -> {
 });
 ```
 
+---
+NoteItem 類別:
+```java
+public class NoteItem {
+    private String id;           // 唯一識別（例如 UUID）
+    private String title;        // 顯示的名稱，例如 SPX 1
+    private String category;     // 分類：例如「一般」「蝦皮」
+    private String content;      // 預留的描述或內文
+    private String imagePath;    // 可選圖片路徑（asset 或 URL）
+
+    // 建構子
+    public NoteItem(String id, String title, String category) {
+        this.id = id;
+        this.title = title;
+        this.category = category;
+    }
+}
+```
 ---
 
 ## 📌 小結與使用說明
