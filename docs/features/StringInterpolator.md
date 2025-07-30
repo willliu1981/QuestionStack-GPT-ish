@@ -1,4 +1,4 @@
-```java
+``` java
 package idv.kuan.studio.libgdx.simpleui.tool;
 
 import java.lang.reflect.Field;
@@ -19,7 +19,12 @@ public class StringInterpolator {
     }
 
     public StringInterpolator(Object model) {
+        this.model = model;
         this.shell = null;
+    }
+
+    public StringInterpolator(Interpreter shell, Object model) {
+        this.shell = shell;
         this.model = model;
     }
 
@@ -32,87 +37,105 @@ public class StringInterpolator {
 
         while (matcher.find()) {
             String expr = matcher.group(1);
-            String result = resolveExpression(expr);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(result));
+            String replacement = resolve(expr);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
         }
+
         matcher.appendTail(sb);
         return sb.toString();
     }
 
-    private String resolveExpression(String expr) {
-        Object result = null;
+    private String resolve(String expr) {
+        Object value = null;
 
-        // 1. 嘗試用shell取得物件或map
+        // 優先從 shell 取值
         if (shell != null) {
             try {
-                result = shell.get(expr);
-                if (result != null && !result.toString().isEmpty()) {
-                    return result.toString();
+                Object root = shell.get(getRootToken(expr));
+                if (root != null) {
+                    value = resolveTokens(expr, root);
+                    if (value != null) return value.toString();
                 }
-            } catch (EvalError ignored) {}
-
-            // shell 若取得的是 map 或 object，再做進一步解析
-            String[] parts = expr.split("(?=\\[)|(?<=])|\\.");
-            if (parts.length > 1) {
-                try {
-                    Object ctx = shell.get(parts[0]);
-                    result = resolveFromPath(parts, ctx, true);
-                    if (result != null) return result.toString();
-                } catch (EvalError ignored) {}
+            } catch (EvalError ignored) {
             }
         }
 
-        // 2. model (僅支援物件欄位存取)
+        // 再從 model 嘗試
         if (model != null) {
-            String[] parts = expr.split("(?=\\[)|(?<=])|\\.");
-            result = resolveFromPath(parts, model, false);
-            if (result != null) return result.toString();
+            try {
+                Object root;
+                if (model instanceof Map<?, ?> modelMap) {
+                    root = modelMap.get(getRootToken(expr));
+                } else {
+                    Field field = getFieldByName(model.getClass(), getRootToken(expr));
+                    if (field != null) {
+                        field.setAccessible(true);
+                        root = field.get(model);
+                    } else {
+                        root = null;
+                    }
+                }
+
+                if (root != null) {
+                    value = resolveTokens(expr, root);
+                    if (value != null) return value.toString();
+                }
+            } catch (Exception ignored) {
+            }
         }
 
         return "";
     }
 
-    private Object resolveFromPath(String[] parts, Object context, boolean allowMap) {
-        Object current = context;
+    private Object resolveTokens(String expr, Object ctx) {
+        // 拆解 token: 支援 field["inner"]、field.inner 混合
+        String[] tokens = expr.split("(?=\\[)|(?<=])|\\.");
+        // 移除第一個 root
+        int i = 1;
+        if (tokens.length > 0 && (tokens[0].startsWith("[") || tokens[0].equals("."))) i = 0;
 
-        for (int i = 1; i < parts.length; i++) {
-            String part = parts[i];
-            if (part.isEmpty()) continue;
+        for (; i < tokens.length; i++) {
+            String token = tokens[i];
+            token = token.replaceAll("^\\[\"?|\"?]$", ""); // 移除 [" 和 "] 或 [key]
 
-            if (allowMap && part.startsWith("[")) {
-                String key = part.replace("[", "").replace("]", "").replace("\"", "");
-                current = resolveMapValue(current, key);
+            if (ctx instanceof Map<?, ?> map) {
+                ctx = map.get(token);
             } else {
-                current = resolveFieldValue(current, part);
+                try {
+                    Field field = getFieldByName(ctx.getClass(), token);
+                    if (field == null) return null;
+                    field.setAccessible(true);
+                    ctx = field.get(ctx);
+                } catch (Exception e) {
+                    return null;
+                }
             }
 
-            if (current == null) return null;
+            if (ctx == null) return null;
         }
 
-        return current;
+        return ctx;
     }
 
-    private Object resolveMapValue(Object ctx, String key) {
-        if (ctx instanceof Map<?, ?> map) {
-            return map.get(key);
+    private String getRootToken(String expr) {
+        int dotIndex = expr.indexOf('.');
+        int bracketIndex = expr.indexOf('[');
+
+        int endIndex;
+        if (dotIndex == -1 && bracketIndex == -1) {
+            endIndex = expr.length();
+        } else if (dotIndex == -1) {
+            endIndex = bracketIndex;
+        } else if (bracketIndex == -1) {
+            endIndex = dotIndex;
+        } else {
+            endIndex = Math.min(dotIndex, bracketIndex);
         }
-        return null;
+
+        return expr.substring(0, endIndex);
     }
 
-    private Object resolveFieldValue(Object ctx, String fieldName) {
-        if (ctx == null) return null;
-
-        try {
-            Field field = findFieldIncludingSuper(ctx.getClass(), fieldName);
-            if (field != null) {
-                field.setAccessible(true);
-                return field.get(ctx);
-            }
-        } catch (IllegalAccessException ignored) {}
-        return null;
-    }
-
-    private Field findFieldIncludingSuper(Class<?> clazz, String name) {
+    private Field getFieldByName(Class<?> clazz, String name) {
         while (clazz != null) {
             try {
                 return clazz.getDeclaredField(name);
@@ -123,5 +146,4 @@ public class StringInterpolator {
         return null;
     }
 }
-
 ```
