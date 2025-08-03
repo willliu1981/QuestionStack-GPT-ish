@@ -1,7 +1,6 @@
 ``` java
 package idv.kuan.studio.libgdx.simpleui.tool;
 
-import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -11,22 +10,11 @@ import bsh.Interpreter;
 
 public class StringInterpolator {
     private final Interpreter shell;
-    private final Object model;
 
     public StringInterpolator(Interpreter shell) {
         this.shell = shell;
-        this.model = null;
     }
 
-    public StringInterpolator(Object model) {
-        this.model = model;
-        this.shell = null;
-    }
-
-    public StringInterpolator(Interpreter shell, Object model) {
-        this.shell = shell;
-        this.model = model;
-    }
 
     public String interpolate(String text) {
         if (text == null || !text.contains("${")) return text;
@@ -37,8 +25,8 @@ public class StringInterpolator {
 
         while (matcher.find()) {
             String expr = matcher.group(1);
-            String replacement = resolve(expr);
-            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+            String result = resolve(expr);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(result));
         }
 
         matcher.appendTail(sb);
@@ -46,70 +34,69 @@ public class StringInterpolator {
     }
 
     private String resolve(String expr) {
-        Object value = null;
+        if (shell == null) return "${" + expr + "}";
 
-        // 優先從 shell 取值
-        if (shell != null) {
-            try {
-                Object root = shell.get(getRootToken(expr));
+        try {
+            // 先解析 fallback，例如 ${aaa.bbb?default}
+            int questionIndex = expr.indexOf('?');
+            String mainExpr = questionIndex >= 0 ? expr.substring(0, questionIndex) : expr;
+            String fallback = questionIndex >= 0 ? expr.substring(questionIndex + 1) : null;
+
+            // 若包含冒號，例如 aaa.bbb:xxx.yyy → 表示查 Map 中 key
+            int colonIndex = mainExpr.indexOf(':');
+            if (colonIndex != -1) {
+                String objExpr = mainExpr.substring(0, colonIndex);   // aaa.bbb
+                String key = mainExpr.substring(colonIndex + 1);      // xxx.yyy
+
+                Object root = shell.get(getRootToken(objExpr));
                 if (root != null) {
-                    value = resolveTokens(expr, root);
-                    if (value != null) return value.toString();
-                }
-            } catch (EvalError ignored) {
-            }
-        }
-
-        // 再從 model 嘗試
-        if (model != null) {
-            try {
-                Object root;
-                if (model instanceof Map<?, ?> modelMap) {
-                    root = modelMap.get(getRootToken(expr));
-                } else {
-                    Field field = getFieldByName(model.getClass(), getRootToken(expr));
-                    if (field != null) {
-                        field.setAccessible(true);
-                        root = field.get(model);
-                    } else {
-                        root = null;
+                    Object ctx = resolveTokens(objExpr, root);
+                    if (ctx instanceof Map<?, ?> map) {
+                        Object val = map.get(key);
+                        if (val != null) return val.toString();
                     }
                 }
 
-                if (root != null) {
-                    value = resolveTokens(expr, root);
-                    if (value != null) return value.toString();
-                }
-            } catch (Exception ignored) {
+                // 解析失敗使用 fallback
+                return fallback != null ? fallback : "${" + expr + "}";
             }
-        }
 
-        return "";
+            // 一般巢狀屬性解析
+            Object root = shell.get(getRootToken(mainExpr));
+            if (root != null) {
+                Object value = resolveTokens(mainExpr, root);
+                if (value != null) return value.toString();
+            }
+
+            return fallback != null ? fallback : "${" + expr + "}";
+
+        } catch (EvalError e) {
+            return "${" + expr + "}";
+        }
     }
 
     private Object resolveTokens(String expr, Object ctx) {
-        // 拆解 token: 支援 field["inner"]、field.inner 混合
         String[] tokens = expr.split("(?=\\[)|(?<=])|\\.");
-        // 移除第一個 root
         int i = 1;
         if (tokens.length > 0 && (tokens[0].startsWith("[") || tokens[0].equals("."))) i = 0;
 
         for (; i < tokens.length; i++) {
-            String token = tokens[i];
-            token = token.replaceAll("^\\[\"?|\"?]$", ""); // 移除 [" 和 "] 或 [key]
+            String token = tokens[i].replaceAll("^\\[\"?|\"?]$", "");
 
             if (ctx instanceof Map<?, ?> map) {
                 ctx = map.get(token);
+            } else if (ctx instanceof SessionContext sc) {
+                ctx = sc.get(token); // 呼叫你提供的 get(String)
             } else {
                 try {
-                    Field field = getFieldByName(ctx.getClass(), token);
-                    if (field == null) return null;
-                    field.setAccessible(true);
-                    ctx = field.get(ctx);
-                } catch (Exception e) {
+                    Interpreter temp = new Interpreter();
+                    temp.set("ctx", ctx);
+                    ctx = temp.eval("ctx." + token);
+                } catch (EvalError e) {
                     return null;
                 }
             }
+
 
             if (ctx == null) return null;
         }
@@ -120,30 +107,17 @@ public class StringInterpolator {
     private String getRootToken(String expr) {
         int dotIndex = expr.indexOf('.');
         int bracketIndex = expr.indexOf('[');
+        int colonIndex = expr.indexOf(':');
+        int questionIndex = expr.indexOf('?');
 
-        int endIndex;
-        if (dotIndex == -1 && bracketIndex == -1) {
-            endIndex = expr.length();
-        } else if (dotIndex == -1) {
-            endIndex = bracketIndex;
-        } else if (bracketIndex == -1) {
-            endIndex = dotIndex;
-        } else {
-            endIndex = Math.min(dotIndex, bracketIndex);
-        }
+        int endIndex = expr.length();
+        if (dotIndex != -1) endIndex = Math.min(endIndex, dotIndex);
+        if (bracketIndex != -1) endIndex = Math.min(endIndex, bracketIndex);
+        if (colonIndex != -1) endIndex = Math.min(endIndex, colonIndex);
+        if (questionIndex != -1) endIndex = Math.min(endIndex, questionIndex);
 
         return expr.substring(0, endIndex);
     }
-
-    private Field getFieldByName(Class<?> clazz, String name) {
-        while (clazz != null) {
-            try {
-                return clazz.getDeclaredField(name);
-            } catch (NoSuchFieldException e) {
-                clazz = clazz.getSuperclass();
-            }
-        }
-        return null;
-    }
 }
+
 ```
