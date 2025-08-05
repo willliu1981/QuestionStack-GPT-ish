@@ -290,25 +290,25 @@ xml部分範例
     </template>
 
     <template id="item_supply">
-    <table>
-        <table pad="0,10,0,10">
-            <table align="left">
-                <label id="${id}_qty" fontSize="75" width="100" textAlign="center">0</label>
+        <table>
+            <table pad="0,10,0,10">
+                <table align="left">
+                    <label id="${id}_qty" fontSize="75" width="100" textAlign="center">0</label>
+                </table>
+                <table>
+                    <image size="100,100" src="${texturePath}" />
+                    <label fontSize="50" padLeft="50" textAlign="center" flags="next">${displayName}
+                    </label>
+                </table>
             </table>
-            <table>
-                <image size="100,100" src="${texturePath}" />
-                <label fontSize="50" padLeft="50" textAlign="center" flags="next">${displayName}
-                </label>
+            <table if="showAdjust" pad="0,10,30,10" flags="newline" >
+                <textButton id="${id}_minus" fontSize="50" width="200" color="#A9CFA3" onClick='adjustItem("${id}", -1)'>-
+                </textButton>
+                <textButton id="${id}_plus" fontSize="50" width="200" color="#D8A5A5" onClick='adjustItem("${id}", 1)'>+
+                </textButton>
             </table>
         </table>
-        <table if="showAdjust" pad="0,10,30,10" flags="newline" >
-            <textButton id="${id}_minus" fontSize="50" width="200" color="#A9CFA3" onClick='adjustItem("${id}", -1)'>-
-            </textButton>
-            <textButton id="${id}_plus" fontSize="50" width="200" color="#D8A5A5" onClick='adjustItem("${id}", 1)'>+
-            </textButton>
-        </table>
-    </table>
-</template>
+    </template>
 </UI>
 ```
 ---
