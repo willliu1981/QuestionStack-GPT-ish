@@ -281,3 +281,34 @@ xml部分範例
 </UI>
 
 ```
+---
+補充的proguard rules
+```
+
+############################################
+# 只保留脚本中会调用到的那些方法签名
+-keep class idv.kuan.studio.libgdx.simpleui.scripting.** {
+    *;
+}
+
+############################################
+# 可选：完整保留 BeanShell 运行时自身类（防止它被误删或混淆）
+-keep class bsh.** {
+    *;
+}
+
+
+# 忽略所有 Android 上不存在的外部 API
+-dontwarn java.awt.**
+-dontwarn javax.swing.**
+-dontwarn javax.script.**
+-dontwarn javax.servlet.**
+-dontwarn org.apache.bsf.**
+
+# **重點**：忽略 BeanShell demo/Servlet/Engine 的 missing refs
+-dontwarn bsh.util.**
+-dontwarn bsh.servlet.**
+-dontwarn bsh.engine.**
+
+```
+-keep class bsh.** { *;} 這個部分 注解掉我的就不能運行,應該不能是可選
