@@ -314,15 +314,12 @@ xml部分範例
 ---
 補充的proguard rules
 ```
+...前略
 
-############################################
-# 只保留脚本中会调用到的那些方法签名
 -keep class idv.kuan.studio.libgdx.simpleui.scripting.** {
     *;
 }
 
-############################################
-# 可选：完整保留 BeanShell 运行时自身类（防止它被误删或混淆）
 -keep class bsh.** {
     *;
 }
@@ -341,4 +338,4 @@ xml部分範例
 -dontwarn bsh.engine.**
 
 ```
--keep class bsh.** { *;} 這個部分 注解掉我的就不能運行,應該不能是可選
+
