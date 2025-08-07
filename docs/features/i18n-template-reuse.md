@@ -1,77 +1,75 @@
-# 重用 i18n 條目於多個 UI 模板
-
-**目錄**
-
-* [背景](#背景)
-* [問題描述](#問題描述)
-* [解決方案](#解決方案)
-
-  * [方案一：alias 屬性](#方案一alias-屬性)
-  * [方案二：UI ↔ i18n 解耦](#方案二ui-↔-i18n-解耦)
-* [結論](#結論)
+你会发现，真正“重复”的其实只是你的 i18n 条目，而 UI 模板只是两种不同的布局——它们背后用的还是同一批翻译 key（比如 `supply.water`、`supply.tea`……）。最理想的做法，是让这两套 UI 模板都“指向”同一个翻译模板，而不是为每个 UI 模板都写一份翻译。下面给你两种简单可行的思路：
 
 ---
 
-## 背景
+## 方案一：在 i18n XML 里加一个 alias 属性
 
-在開發 SimpleUI 時，我們希望使用同一組 `item_supply` 資料（翻譯條目）來生成多種**不同版面**的影像清單，例如「檢查模式」和「清單模式」。
+把所有 `item_supply` 相关的 `<entry>` 只写一次，然后用一个逗号分隔的 `alias` 属性把它“复制”给其他模板 ID：
 
-同時，我們透過 XML 模板（`item_supply_inspection.xml`、`item_supply_checklist.xml`）來描述各自的布局，但兩者對應底層的翻譯 key（如 `supply.water`、`supply.tea`……）完全一樣。
+```xml
+<!-- i18n.xml -->
+<template id="item_supply"
+          alias="item_supply_inspection,item_supply_checklist">
+  <entry name="supply.water"  value="Bottled Water"/>
+  <entry name="supply.tea"    value="Tea Bag"/>
+  ……
+</template>
+```
 
-## 問題描述
+然后在你的 `I18nManager.load()` 里：
 
-* 若在 i18n 檔案中為每個 UI 模板都寫一份重複的 `<entry>`，會導致維護成本大增，且條目冗餘。
-* 需要一個方法，讓多個「外觀不同」的 UI 模板，共享同一套 i18n 翻譯資料。
+```java
+for (XmlReader.Element tmpl : root.getChildrenByName("template")) {
+  String id    = tmpl.getAttribute("id");
+  String alias = tmpl.getAttribute("alias", null);
 
-## 解決方案
+  Map<String,I18nEntry> map = parseEntries(tmpl);
+  // 把自己 put 一次
+  i18nMapByScreen.put(id, map);
+  // 如果有 alias，把 alias 分出来也 put 一次
+  if (alias != null) for (String a: alias.split(",")) {
+    i18nMapByScreen.put(a.trim(), map);
+  }
+}
+```
 
-### 方案一：alias 屬性
+这样：
 
-1. **i18n XML** 中只定義一次 `item_supply` 條目，並新增 `alias` 屬性：
-
-   ```xml
-   <template id="item_supply"
-             alias="item_supply_inspection,item_supply_checklist">
-     <entry name="supply.water" value="Bottled Water" />
-     <entry name="supply.tea"   value="Tea Bag" />
-     <!-- 其他 supply 條目 -->
-   </template>
-   ```
-2. 在 `I18nManager.load()` 中解析 alias：
-
-   ```java
-   String alias = elem.getAttribute("alias", null);
-   // 儲存原始 id 的 map
-   i18nMapByScreen.put(id, map);
-   // 如果有 alias，分拆後也用同一份 map
-   if (alias != null) {
-     for (String a : alias.split(",")) {
-       i18nMapByScreen.put(a.trim(), map);
-     }
-   }
-   ```
-3. 使用 `item_supply_inspection` 或 `item_supply_checklist` 作為 UI 模板 ID 時，都會拿到同一套翻譯。
-
-### 方案二：UI ↔ i18n 解耦
-
-1. 在 **UIBuilder** 收集模板時，給每個 UI 模板多一個自訂屬性 `i18n`：
-
-   ```xml
-   <template id="item_supply_inspection" i18n="item_supply">
-     <!-- layout A -->
-   </template>
-   <template id="item_supply_checklist"  i18n="item_supply">
-     <!-- layout B -->
-   </template>
-   ```
-2. `collectTemplates(...)` 時，同時記錄 `uiToI18n.put(uiId, i18nKey)`。
-3. `setupShellVariables(...)` 提供給 i18nManager 的 `templateIds`，改由 `uiToI18n.values()` 提取，避免重複。
-
-## 結論
-
-* **不要** 為每個 UI 模板都複寫相同的翻譯條目。
-* 利用 `alias` 或在 UI 模板中加 `i18n` 屬性，**複用** 同一份翻譯，就能在不同布局間共用相同的多國語系資料。
+* `item_supply_inspection` 和 `item_supply_checklist` 都会“拿到”同一份 `map`，根本不用在 XML 里写两份重复的 `<entry>`。
+* 当你切换到不同 screen 时，只要 include 对应的 UI 模板，i18nManager 就会自动去拿那个模板 ID（或它的 alias）的翻译。
 
 ---
 
-*文件名稱：`i18n-template-reuse.md`*
+## 方案二：在 UIBuilder 收集模板时，把 UI 模板 ID ↔ i18n 模板 ID 解耦
+
+给你的 UI XML 里的 `<template>` 加个自定义属性，比如 `i18n="item_supply"`，标明它要用哪套翻译：
+
+```xml
+<template id="item_supply_inspection" i18n="item_supply">
+   … 布局代码 …
+</template>
+<template id="item_supply_checklist"  i18n="item_supply">
+   … 略有不同的布局 …
+</template>
+```
+
+然后在 `collectTemplates(...)` 的时候，不只把 `templates.put(id, elem)`，还把一张 map 记录这个 `id` 对应的 `i18n` key：
+
+```java
+Map<String,String> uiToI18n = new HashMap<>();
+
+String id    = elem.getAttribute("id");
+String i18nKey = elem.getAttribute("i18n", id); // 默认就是自己
+templates.put(id, elem);
+uiToI18n.put(id, i18nKey);
+```
+
+最后在 `setupShellVariables(...)` 时，传给 i18nManager 的 templateIds 用 `uiToI18n.values()` 而不是 `templates.keySet()`，这样不管你有多少个 UI 模板，实际上翻译只会拉那几个真正的 i18nKey，不会重复。
+
+---
+
+### 总结
+
+* **不要** 在 i18n XML 里为每个 UI 模板都写一份完全相同的 `<entry>`。
+* **复用** 同一套翻译：要么通过 `alias`，要么通过给 UI 模板打一个指向同一翻译组的 `i18n` 属性。
+* 这样无论将来你有 2 个、5 个还是 10 个长得略不一样的 `item_supply` 模板，都只写一组翻译，维护成本极低。
