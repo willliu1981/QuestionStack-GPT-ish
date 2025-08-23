@@ -1,129 +1,104 @@
+
+
+
+# UIStateManager（簡化版）：參數 & 觸發器
+
+## TL;DR
+- 用 `params`（bool/int/float/string）表示持續條件；用 `trigger` 表示一次性事件。
+- 任何寫入都會 `touch()` → `version`++ 與 `lastUpdatedNanos` 更新，便於髒檢與去抖。
+- 以 `StateKey` 區隔不同畫面/範圍；順序有意義。
+
+## 核心概念
+- **StateKey**：`StateKey.of("settings")`、`StateKey.of("inspection", cateId)`。
+- **Params**：`setBool/setInt/setFloat/setString/get*`。
+- **Triggers**：`trigger/hasTrigger/poppedTrigger`（消費後即不存在）。
+- **DataList/Payload**：維持既有資料掛載與任意附加物件。
+- **touch()**：任何變更都會更新 `version` 與 `lastUpdatedNanos`。
+
+## 快速範例
+```java
+UIStateManager stateMgr = new UIStateManager(new Object());
+var k = UIStateManager.StateKey.of("settings");
+
+// 語系切換：只刷新視圖
+stateMgr.setString(k, "language", "ja");
+stateMgr.setBool(k, "needsRefreshView", true);
+
+// 一次性事件：還原預設
+stateMgr.trigger(k, "reset_to_default");
+
+// 在更新迴圈：
+if (stateMgr.poppedTrigger(k, "reset_to_default")) {
+    // 套用預設值，只刷新 Actor，不動資料
+}
+
+```
+
+---
+UIStateManager
 ```java
 package idv.kuan.studio.libgdx.simpleui.runtime;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Predicate;
-
 import idv.kuan.studio.libgdx.simpleui.builder.BuiltUI;
-import idv.kuan.studio.libgdx.simpleui.context.ApplicationContext;
+
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 管理每個畫面的 UI 與其對應資料（清單或任意 payload）的狀態。
+ * UIStateManager（簡化版）：以「參數（params）」與「觸發器（triggers）」管理每個畫面/範圍（StateKey）的 UI 狀態。
  *
- * 特點：
- * - 以「可變長度複合鍵」StateKey 區分不同狀態（鍵的順序有意義）
- * - 提供 needsRecreate 旗標以控制是否重建 UI
- * - 可批次標記/刪除（依鍵前綴 prefix）
- * - 提供 dataList（List<Map>）與 get/setData(itemId, dataKey, ...) 便捷介面
- * - 允許附加任意 payload（如排序條件、查詢參數）
+ * <p><b>核心概念</b></p>
+ * <ul>
+ *   <li><b>StateKey</b>：可變長度複合鍵（順序有意義）。同一鍵代表同一「畫面/範圍」的狀態袋。</li>
+ *   <li><b>Params</b>：一般狀態值（bool/int/float/string），適合「持續條件」，例如 language、needsRefreshView。</li>
+ *   <li><b>Triggers</b>：一次性事件（邊緣），以 Set 儲存；<code>trigger()</code> 設置事件，<code>poppedTrigger()</code> 消費後即不存在。</li>
+ *   <li><b>touch()</b>：任何寫入（UI/資料/參數/觸發器）都會遞增 <code>version</code> 並更新 <code>lastUpdatedNanos</code>，
+ *       供外部做髒檢、快取失效與去抖（debounce）。</li>
+ *   <li><b>DataList / Payload</b>：保留清單資料與任意附加物件（如查詢條件）。</li>
+ * </ul>
  *
- * 基本用法：
- * <pre>{@code
- * UIStateManager sm = new UIStateManager(context);
- * UIStateManager.StateKey key = UIStateManager.StateKey.of("inspection_supplyitem", cateId);
+ * <p><b>典型流程</b></p>
+ * <ol>
+ *   <li>以 <code>StateKey.of(...)</code> 取得/建立狀態袋：<code>UIState s = stateFor(key)</code>。</li>
+ *   <li>寫入參數：<code>setBool(key,"needsRefreshView",true)</code> 或 <code>setString(key,"language","ja")</code>。</li>
+ *   <li>一次性事件：<code>trigger(key,"reset_to_default")</code>；在更新迴圈用 <code>poppedTrigger(key,"reset_to_default")</code> 處理一次。</li>
+ *   <li>髒檢：比對 <code>version</code>；或以 <code>now - lastUpdatedNanos &gt;= quiet</code> 去抖後再刷新 UI。</li>
+ * </ol>
  *
- * UIStateManager.UIState state = sm.stateFor(key);
- * if (state.getUI() == null || state.needsRecreate()) {
- *     // 1) 建 UI
- *     BuiltUI ui = builder.build(...);
- *     sm.registerUI(key, ui);
+ * <p><b>遷移建議（自 needsRecreate → params/trigger）</b></p>
+ * <ul>
+ *   <li>原 <code>needsRecreate</code> → 以 <code>setBool(key,"needsRefreshView",true)</code> 代表「僅刷新視圖」。</li>
+ *   <li>「還原預設」→ 以 <code>trigger(key,"reset_to_default")</code> 實作一次性動作（只刷新 Actor，不動資料）。</li>
+ * </ul>
  *
- *     // 2) 放資料清單（會自動依 "id" 建索引）
- *     List<Map<String,Object>> list = service.getAllByCategory(cateId, Sort.INSPECTION);
- *     sm.setDataList(key, list);
+ * <p><b>執行緒與效能</b></p>
+ * <ul>
+ *   <li>內部採用 ConcurrentHashMap/volatile；建議僅在 LibGDX 渲染執行緒寫入，跨緒請排隊投遞。</li>
+ *   <li>查表均為攤銷 O(1)；大量 scope 請定期 <code>reset/resetByPrefix</code> 釋放。</li>
+ * </ul>
  *
- *     // 3) 重建完成
- *     sm.setNeedsRecreate(key, false);
- * }
- *
- * // 取回 UI
- * BuiltUI ui = sm.getUI(key);
- * }</pre>
- *
- * 取得/設定單筆資料欄位：
- * <pre>{@code
- * // 讀取（若不存在給預設值，並可選擇 putIfAbsent）
- * Object qty = sm.getData(key, "room11", "quantity", 0, true); // 不存在則寫入 0 並回傳 0
- *
- * // 寫入
- * sm.setData(key, "room11", "quantity", 5);
- * }</pre>
- *
- * Payload（非清單型附加資料）：
- * <pre>{@code
- * sm.setPayload(key, new SortSpec("inspection"));
- * SortSpec spec = sm.getPayload(key, SortSpec.class);
- * }</pre>
- *
- * 重新標記與批次操作：
- * <pre>{@code
- * // 指定鍵：標記需要重建 / 移除
- * sm.setNeedsRecreate(key, true);
- * sm.reset(key);
- *
- * // 依前綴批次（例如整個 cateId 的畫面群）
- * sm.markRecreateByPrefix("inspection_supplyitem", cateId);
- * sm.resetByPrefix("inspection_supplyitem"); // 清掉該模組所有 cateId 狀態
- *
- * // 全清
- * sm.resetAll();
- * }</pre>
- *
- * 前綴比對（startsWith）說明：
- * <pre>{@code
- * // 下列兩者不是同一個 key（順序有意義）
- * StateKey.of("inspection_supplyitem", cateId)
- * StateKey.of(cateId, "inspection_supplyitem")
- *
- * // resetByPrefix("inspection_supplyitem", cateId) 只會匹配以此序列開頭的鍵
- * }</pre>
- *
- * 執行緒安全與注意事項：
- * - STATES 為 ConcurrentHashMap；keys() 回傳的是快照，不保證之後不變。
- * - setDataList 會淺拷貝清單／Map，避免外部修改影響內部索引。
- * - getData(...) 對不存在的 itemId / dataKey 會丟 RuntimeException；若要寬鬆，請改用帶 defaultValue 的版本。
- * - 請以「同一個 StateKey」貫穿 UI 建立、資料掛載與後續更新；鍵不一致會被視為不同狀態。
+ * <p><b>命名建議</b>：避免把管理器變數命名為 <code>uiState</code> 以免與內部類 <code>UIState</code> 混淆。建議 <code>stateMgr</code> 或腳本別名 <code>uiStateMgr()</code>。</p>
  */
-
 public final class UIStateManager {
-
-    public UIStateManager(ApplicationContext context) {
-        Objects.requireNonNull(context, "Config must not be null");
-
-        // 可用 context 作為後續擴充使用
-
-    }
-
     /**
      * 全部狀態（thread-safe）
      */
     private final Map<StateKey, UIState> STATES = new ConcurrentHashMap<>();
 
-    /* ----------------------------- 取得/建立狀態 ----------------------------- */
+    public UIStateManager(Object context) {
+        Objects.requireNonNull(context, "context must not be null");
+    }
 
-    /**
-     * 取得既有狀態；不存在則建立空殼（needsRecreate 預設 true）
-     */
+    /* ----------------------------- 狀態存取 ----------------------------- */
     public UIState stateFor(StateKey key) {
         return STATES.computeIfAbsent(key, UIState::new);
     }
 
-    /**
-     * 取得既有狀態；無則回傳 null
-     */
     public UIState getState(StateKey key) {
         return STATES.get(key);
     }
 
-    /* ----------------------------- UI 與資料存取 ----------------------------- */
-
+    /* ----------------------------- UI 存取 ----------------------------- */
     public void registerUI(StateKey key, BuiltUI ui) {
         stateFor(key).setUi(ui);
     }
@@ -133,179 +108,166 @@ public final class UIStateManager {
         return s != null ? s.getUI() : null;
     }
 
+    /* ----------------------------- 清單資料 ----------------------------- */
     public void setDataList(StateKey key, List<Map<String, Object>> list) {
-        // 淺複製，避免外部修改影響內部；必要時對 map 也 copy
         List<Map<String, Object>> copy = new ArrayList<>();
         for (Map<String, Object> m : list) copy.add(new HashMap<>(m));
         stateFor(key).setDataList(Collections.unmodifiableList(copy));
     }
 
-
     public List<Map<String, Object>> getDataList(StateKey key) {
-        UIState state = STATES.get(key);
-        return state != null ? state.getDataList() : Collections.emptyList();
+        UIState s = STATES.get(key);
+        return s != null ? s.getDataList() : Collections.emptyList();
     }
 
-    public Object getData(StateKey stateKey, String itemKey, String dataKey) {
-        if (!STATES.containsKey(stateKey)) {
-            throw new RuntimeException(
-                UIStateManager.class.getSimpleName() + " getData: 找不到 stateKey: " + stateKey);
-        }
-
-        Map<String, Object> map = STATES.get(stateKey).getItem(itemKey);
-        if (map == null) {
-            throw new RuntimeException(
-                UIStateManager.class.getSimpleName() + " getData: 找不到 itemKey: " + itemKey + " (stateKey=" + stateKey + ")");
-        }
-
-        if (!map.containsKey(dataKey)) {
-            throw new RuntimeException(
-                UIStateManager.class.getSimpleName() + " getData: 找不到 dataKey: " + dataKey + " (itemKey=" + itemKey + ")");
-        }
-        return map.get(dataKey); // 可能為 null（如果鍵存在但值為 null），這是預期行為
+    public Object getData(StateKey key, String itemId, String dataKey) {
+        UIState s = STATES.get(key);
+        if (s == null) throw new RuntimeException("getData: no state for " + key);
+        Map<String, Object> map = s.getItem(itemId);
+        if (map == null) throw new RuntimeException("getData: no itemId=" + itemId);
+        if (!map.containsKey(dataKey)) throw new RuntimeException("getData: no dataKey=" + dataKey);
+        return map.get(dataKey);
     }
 
-
-    public Object getData(StateKey stateKey, String itemKey, String dataKey, Object defaultValue, boolean putIfAbsent) {
-        List<Map<String, Object>> dataList = getDataList(stateKey);
-        Map<String, Object> map = dataList.stream()
-            .filter(m -> itemKey.equals(m.get("id")))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException(
-                UIStateManager.class.getSimpleName() + " getData: 找不到 itemKey: " + itemKey));
-
+    public Object getData(StateKey key, String itemId, String dataKey, Object def, boolean putIfAbsent) {
+        List<Map<String, Object>> list = getDataList(key);
+        Map<String, Object> map = list.stream()
+            .filter(m -> itemId.equals(String.valueOf(m.get("id")))).findFirst()
+            .orElseThrow(() -> new RuntimeException("getData: no itemId=" + itemId));
         if (!map.containsKey(dataKey)) {
-            if (putIfAbsent) {
-                map.put(dataKey, defaultValue);
-            }
-            return defaultValue;
+            if (putIfAbsent) map.put(dataKey, def);
+            return def;
         }
         return map.get(dataKey);
     }
 
-    public void setData(StateKey stateKey, String itemKey, String dataKey, Object value) {
-        List<Map<String, Object>> dataList = getDataList(stateKey);
-        Map<String, Object> map = dataList.stream()
-            .filter(m -> itemKey.equals(m.get("id")))
-            .findFirst()
-            .orElseThrow(() -> new RuntimeException(
-                UIStateManager.class.getSimpleName() + " getData: 找不到 itemKey: " + itemKey));
-
+    public void setData(StateKey key, String itemId, String dataKey, Object value) {
+        List<Map<String, Object>> list = getDataList(key);
+        Map<String, Object> map = list.stream()
+            .filter(m -> itemId.equals(String.valueOf(m.get("id")))).findFirst()
+            .orElseThrow(() -> new RuntimeException("setData: no itemId=" + itemId));
         map.put(dataKey, value);
     }
 
-
-    /**
-     * 若不是清單資料，也可放任意 payload（例如排序條件、查詢參數等）
-     */
+    /* ----------------------------- Payload ----------------------------- */
     public void setPayload(StateKey key, Object payload) {
         stateFor(key).setPayload(payload);
     }
 
     public <T> T getPayload(StateKey key, Class<T> type) {
         UIState s = STATES.get(key);
-        if (s == null || s.getPayload() == null) return null;
-        return type.cast(s.getPayload());
+        return (s == null || s.getPayload() == null) ? null : type.cast(s.getPayload());
     }
 
-    /* ----------------------------- 重建旗標 ----------------------------- */
-
-    public void setNeedsRecreate(StateKey key, boolean flag) {
-        stateFor(key).markRecreate(flag);
+    /* ----------------------------- 參數（狀態） ----------------------------- */
+    public void setParam(StateKey key, String name, Object value) {
+        stateFor(key).setParam(name, value);
     }
 
-    public boolean needsRecreate(StateKey key) {
-        UIState s = STATES.get(key);
-        return s != null && s.needsRecreate();
+    public <T> T getParam(StateKey key, String name, Class<T> type, T def) {
+        return stateFor(key).getParam(name, type, def);
     }
 
-    /**
-     * 批次標記需要重建
-     */
-    public void markRecreate(StateKey... keys) {
-        for (StateKey k : keys) {
-            setNeedsRecreate(k, true);
-        }
+    public void removeParam(StateKey key, String name) {
+        stateFor(key).removeParam(name);
     }
 
-    /**
-     * 依「鍵前綴」批次標記重建（例如傳入 screenName, cateId）
-     */
-    public void markRecreateByPrefix(Object... prefixParts) {
-        forEachKeyMatchingPrefix(prefixParts, k -> {
-            setNeedsRecreate(k, true);
-            return true;
-        });
+    // 型別便捷
+    public void setBool(StateKey k, String n, boolean v) {
+        setParam(k, n, v);
     }
 
-    /* ----------------------------- 重置/刪除 ----------------------------- */
+    public boolean getBool(StateKey k, String n) {
+        Boolean b = getParam(k, n, Boolean.class, false);
+        return b != null && b;
+    }
 
-    /**
-     * 移除指定 keys 的狀態（下次會從 0 開始重建）
-     */
+    public void setInt(StateKey k, String n, int v) {
+        setParam(k, n, v);
+    }
+
+    public int getInt(StateKey k, String n, int def) {
+        Integer v = getParam(k, n, Integer.class, def);
+        return v != null ? v : def;
+    }
+
+    public void setFloat(StateKey k, String n, float v) {
+        setParam(k, n, v);
+    }
+
+    public float getFloat(StateKey k, String n, float def) {
+        Float v = getParam(k, n, Float.class, def);
+        return v != null ? v : def;
+    }
+
+    public void setString(StateKey k, String n, String v) {
+        setParam(k, n, v);
+    }
+
+    public String getString(StateKey k, String n, String def) {
+        String v = getParam(k, n, String.class, def);
+        return v != null ? v : def;
+    }
+
+    /* ----------------------------- 觸發器（一次性） ----------------------------- */
+    public void trigger(StateKey key, String name) {
+        stateFor(key).setTrigger(name);
+    }
+
+    public boolean hasTrigger(StateKey key, String name) {
+        return stateFor(key).hasTrigger(name);
+    }
+
+    public boolean poppedTrigger(StateKey key, String name) {
+        return stateFor(key).consumeTrigger(name);
+    }
+
+    /* ----------------------------- 重置 ----------------------------- */
     public void reset(StateKey... keys) {
-        for (StateKey k : keys) {
-            STATES.remove(k);
-        }
+        for (StateKey k : keys) STATES.remove(k);
     }
 
-    /**
-     * 依「鍵前綴」批次移除（例如整個畫面或某 cateId 全部清掉）
-     */
     public void resetByPrefix(Object... prefixParts) {
-        List<StateKey> toRemove = new ArrayList<>();
+        List<StateKey> del = new ArrayList<>();
         forEachKeyMatchingPrefix(prefixParts, k -> {
-            toRemove.add(k);
+            del.add(k);
             return true;
         });
-        toRemove.forEach(STATES::remove);
+        del.forEach(STATES::remove);
     }
 
-    /**
-     * 清空所有狀態（請小心使用）
-     */
     public void resetAll() {
         STATES.clear();
     }
 
-    /* ----------------------------- 查詢/工具 ----------------------------- */
-
-    /**
-     * 遍歷符合條件的 key（內部使用）
-     */
-    private void forEachKeyMatchingPrefix(Object[] prefix, Predicate<StateKey> action) {
-        for (StateKey k : STATES.keySet()) {
-            if (k.startsWith(prefix)) {
-                if (!action.test(k)) break;
-            }
-        }
-    }
-
-    /**
-     * 列出目前持有的所有 key（除錯用）
-     */
+    /* ----------------------------- 工具 ----------------------------- */
     public List<StateKey> keys() {
         return new ArrayList<>(STATES.keySet());
     }
 
-    /* ----------------------------- 型別：UIState ----------------------------- */
+    private void forEachKeyMatchingPrefix(Object[] prefix, java.util.function.Predicate<StateKey> action) {
+        for (StateKey k : STATES.keySet())
+            if (k.startsWith(prefix)) {
+                if (!action.test(k)) break;
+            }
+    }
 
+    /* ----------------------------- 內部型別 ----------------------------- */
     public static final class UIState {
         private final StateKey key;
         private volatile BuiltUI ui;
         private volatile List<Map<String, Object>> dataList = Collections.emptyList();
         private volatile Map<String, Map<String, Object>> byId = Map.of();
         private volatile Object payload;
-        private volatile boolean needsRecreate = true;
+
+        private final Map<String, Object> params = new ConcurrentHashMap<>();
+        private final Set<String> triggers = ConcurrentHashMap.newKeySet();
+
         private volatile long version = 0L;
         private volatile long lastUpdatedNanos = System.nanoTime();
 
         UIState(StateKey key) {
             this.key = key;
-        }
-
-        public StateKey getKey() {
-            return key;
         }
 
         public BuiltUI getUI() {
@@ -345,13 +307,39 @@ public final class UIStateManager {
             touch();
         }
 
-        public boolean needsRecreate() {
-            return needsRecreate;
+        // params
+        public void setParam(String name, Object value) {
+            if (value == null) params.remove(name);
+            else params.put(name, value);
+            touch();
         }
 
-        public void markRecreate(boolean b) {
-            this.needsRecreate = b;
+        @SuppressWarnings("unchecked")
+        public <T> T getParam(String name, Class<T> type, T def) {
+            Object v = params.get(name);
+            return type.isInstance(v) ? (T) v : def;
+        }
+
+        public void removeParam(String name) {
+            params.remove(name);
             touch();
+        }
+
+        // triggers
+        public UIState setTrigger(String name) {
+            triggers.add(name);
+            touch();
+            return this;
+        }
+
+        public boolean consumeTrigger(String name) {
+            boolean r = triggers.remove(name);
+            if (r) touch();
+            return r;
+        }
+
+        public boolean hasTrigger(String name) {
+            return triggers.contains(name);
         }
 
         public long version() {
@@ -368,44 +356,29 @@ public final class UIStateManager {
         }
     }
 
-    /* ----------------------------- 型別：StateKey（可變長度） ----------------------------- */
-
     /**
-     * 可變長度複合鍵。順序有意義：
-     * StateKey.of("inspection_supplyitem", cateId)
-     * 和
-     * StateKey.of(cateId, "inspection_supplyitem")
-     * 不是同一個 key。
+     * 可變長度複合鍵（順序有意義）
      */
     public static final class StateKey {
         private final List<Object> parts;
-        private final int hash; // 預先計算，提升 Map 操作效率
+        private final int hash;
 
         private StateKey(List<Object> parts) {
-            // 轉不可變，避免外部修改
             this.parts = Collections.unmodifiableList(new ArrayList<>(parts));
             this.hash = Objects.hash(this.parts.toArray());
         }
 
-        /**
-         * 以可變參數建立 key（順序有意義）
-         */
         public static StateKey of(Object... parts) {
-            if (parts == null || parts.length == 0) {
-                throw new IllegalArgumentException("StateKey parts must not be empty");
-            }
+            if (parts == null || parts.length == 0)
+                throw new IllegalArgumentException("parts must not be empty");
             return new StateKey(Arrays.asList(parts));
         }
 
-        /**
-         * 是否以 prefixParts 開頭（全部相等且順序相同）
-         */
         public boolean startsWith(Object... prefixParts) {
             if (prefixParts == null || prefixParts.length == 0) return true;
             if (prefixParts.length > parts.size()) return false;
-            for (int i = 0; i < prefixParts.length; i++) {
+            for (int i = 0; i < prefixParts.length; i++)
                 if (!Objects.equals(parts.get(i), prefixParts[i])) return false;
-            }
             return true;
         }
 
@@ -415,8 +388,7 @@ public final class UIStateManager {
 
         @Override
         public boolean equals(Object o) {
-            return (this == o) ||
-                (o instanceof StateKey && parts.equals(((StateKey) o).parts));
+            return (this == o) || (o instanceof StateKey && parts.equals(((StateKey) o).parts));
         }
 
         @Override
@@ -432,4 +404,6 @@ public final class UIStateManager {
 }
 
 
+
 ```
+
