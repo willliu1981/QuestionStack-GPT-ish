@@ -45,39 +45,50 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * UIStateManager（簡化版）：以「參數（params）」與「觸發器（triggers）」管理每個畫面/範圍（StateKey）的 UI 狀態。
+ * UIStateManager：以「參數 params」與「觸發器 triggers」管理每個 StateKey 的 UI 狀態。
  *
- * <p><b>核心概念</b></p>
- * <ul>
- *   <li><b>StateKey</b>：可變長度複合鍵（順序有意義）。同一鍵代表同一「畫面/範圍」的狀態袋。</li>
- *   <li><b>Params</b>：一般狀態值（bool/int/float/string），適合「持續條件」，例如 language、needsRefreshView。</li>
- *   <li><b>Triggers</b>：一次性事件（邊緣），以 Set 儲存；<code>trigger()</code> 設置事件，<code>poppedTrigger()</code> 消費後即不存在。</li>
- *   <li><b>touch()</b>：任何寫入（UI/資料/參數/觸發器）都會遞增 <code>version</code> 並更新 <code>lastUpdatedNanos</code>，
- *       供外部做髒檢、快取失效與去抖（debounce）。</li>
- *   <li><b>DataList / Payload</b>：保留清單資料與任意附加物件（如查詢條件）。</li>
- * </ul>
- *
- * <p><b>典型流程</b></p>
+ * <p><b>用法概要</b></p>
  * <ol>
- *   <li>以 <code>StateKey.of(...)</code> 取得/建立狀態袋：<code>UIState s = stateFor(key)</code>。</li>
- *   <li>寫入參數：<code>setBool(key,"needsRefreshView",true)</code> 或 <code>setString(key,"language","ja")</code>。</li>
- *   <li>一次性事件：<code>trigger(key,"reset_to_default")</code>；在更新迴圈用 <code>poppedTrigger(key,"reset_to_default")</code> 處理一次。</li>
- *   <li>髒檢：比對 <code>version</code>；或以 <code>now - lastUpdatedNanos &gt;= quiet</code> 去抖後再刷新 UI。</li>
+ *   <li>建立鍵：<code>StateKey k = StateKey.of("settings", cateId);</code></li>
+ *   <li>寫參數：<code>setBool(k,"needsRefreshView",true); setString(k,"language","ja");</code></li>
+ *   <li>一次性事件：<code>trigger(k,"reset_to_default");</code> → 在更新迴圈以
+ *       <code>poppedTrigger(k,"reset_to_default")</code> 消費後執行一次動作。</li>
+ *   <li>髒檢／去抖：讀取 <code>stateFor(k).version()</code> 與 <code>lastUpdatedNanos()</code>
+ *       判斷是否變更或等待靜默再刷新。</li>
  * </ol>
  *
- * <p><b>遷移建議（自 needsRecreate → params/trigger）</b></p>
+ * <p><b>公開 API 一覽</b></p>
  * <ul>
- *   <li>原 <code>needsRecreate</code> → 以 <code>setBool(key,"needsRefreshView",true)</code> 代表「僅刷新視圖」。</li>
- *   <li>「還原預設」→ 以 <code>trigger(key,"reset_to_default")</code> 實作一次性動作（只刷新 Actor，不動資料）。</li>
+ *   <li>狀態袋：<code>stateFor(key)</code>／<code>getState(key)</code></li>
+ *   <li>UI：<code>registerUI(key, ui)</code>／<code>getUI(key)</code></li>
+ *   <li>清單資料：<code>setDataList/getDataList/getData/setData</code></li>
+ *   <li>Payload：<code>setPayload/getPayload</code></li>
+ *   <li>參數：<code>setParam/getParam/removeParam</code>；型別便捷：
+ *       <code>set/get Bool/Int/Float/String</code></li>
+ *   <li>觸發器：<code>trigger/hasTrigger/poppedTrigger</code></li>
+ *   <li>清理／查詢：<code>reset/resetByPrefix/resetAll/keys</code></li>
  * </ul>
  *
- * <p><b>執行緒與效能</b></p>
+ * <p><b>設計要點</b></p>
  * <ul>
- *   <li>內部採用 ConcurrentHashMap/volatile；建議僅在 LibGDX 渲染執行緒寫入，跨緒請排隊投遞。</li>
- *   <li>查表均為攤銷 O(1)；大量 scope 請定期 <code>reset/resetByPrefix</code> 釋放。</li>
+ *   <li>任何寫入（UI/資料/參數/觸發器）都會更新 <code>version</code> 與
+ *       <code>lastUpdatedNanos</code>（內部 <code>touch()</code> ）。</li>
+ *   <li><code>StateKey</code> 為可變長度複合鍵，順序有意義。</li>
  * </ul>
  *
- * <p><b>命名建議</b>：避免把管理器變數命名為 <code>uiState</code> 以免與內部類 <code>UIState</code> 混淆。建議 <code>stateMgr</code> 或腳本別名 <code>uiStateMgr()</code>。</p>
+ * <p><b>最小範例</b></p>
+ * <pre>{@code
+ * UIStateManager m = new UIStateManager(ctx);
+ * UIStateManager.StateKey k = UIStateManager.StateKey.of("settings");
+ * // 參數
+ * m.setString(k, "language", "ja");
+ * m.setBool(k, "needsRefreshView", true);
+ * // 觸發器
+ * m.trigger(k, "reset_to_default");
+ * if (m.poppedTrigger(k, "reset_to_default")) {
+ *     // 套用預設，只刷新 Actor
+ * }
+ * }</pre>
  */
 public final class UIStateManager {
     /**
